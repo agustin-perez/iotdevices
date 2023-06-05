@@ -347,7 +347,7 @@ void autoConnectInit(){
 
 void setup() {
   hardwareInit();
-  softwareInit()
+  softwareInit();
   autoConnectInit();
   beep(Buzzer::set);
 }
