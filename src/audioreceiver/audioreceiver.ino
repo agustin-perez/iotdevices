@@ -347,8 +347,9 @@ void autoConnectInit(){
 
 void setup() {
   hardwareInit();
-  beep(Buzzer::set);
+  softwareInit()
   autoConnectInit();
+  beep(Buzzer::set);
 }
 
 void millisLoop() {
