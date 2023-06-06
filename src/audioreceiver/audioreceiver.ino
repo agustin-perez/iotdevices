@@ -3,7 +3,7 @@
 #include <PubSubClient.h>
 #include <WebServer.h>
 #include <AutoConnect.h>
-#include <LittleFS.h>
+#include <SPIFFS.h>
 #include <IRsend.h>
 #include <iostream>
 #include <string>
@@ -35,7 +35,6 @@
 #define OPTOPOWER   32 //S3-Y
 #define POWERSENS   12 //S3-W
 //CODE -----------------------
-#define FORMAT_ON_FAIL
 #define CLIENTID "Audio Receiver"
 #define PRONTOLENGTH 104
 
@@ -43,12 +42,13 @@ enum Buzzer {set, on, off, action};
 enum Opto {power, band, fmmode, memory, tuningd, tuningu, dtuning, spka, spkb, vcr1, cd, tuner, phono};
 enum Color {standby, error, onAction, onBoot, onEspError};
 
+fs::SPIFFSFS& FlashFS = SPIFFS;
 const char* mqttClientID = CLIENTID;
 const char* paramFile = "/param.json";
 const char* urlMqttHome = "/";
 const char* urlSettings = "/settings";
 const char* urlSettingsSave = "/save";
-static const char homePage[] PROGMEM = R"({"title": + CLIENTID +, "uri": "/", "menu": true, "element": [
+static const char homePage[] PROGMEM = R"({"title": "Audio Receiver", "uri": "/", "menu": true, "element": [
       {"name": "header", "type": "ACElement", "value": "<h2 style='text-align:center;color:#2f4f4f;margin-top:10px;margin-bottom:10px'>Audio Receiver setup page</h2>"},
       { "name": "content", "type": "ACText", "value": "Powered by <a href=https://github.com/Hieromon/AutoConnect>AutoConnect</a>"},
       { "name": "content2", "type": "ACText", "value": "<br>Part of the project <a href=https://github.com/agustin-perez/iotdevices>IoTDevices</a><br>Agustín Pérez"}]
@@ -80,7 +80,6 @@ AutoConnectConfig config;
 AutoConnectAux homePageObj;
 AutoConnectAux settingsPageObj;
 AutoConnectAux saveSettingsFilePageObj;
-fs::LittleFSFS& FlashFS = LittleFS;
 uint16_t chipIDRaw = 0;
 String chipID;
 String strTopic;
@@ -324,7 +323,6 @@ void softwareInit(){
     chipIDRaw |= ((ESP.getEfuseMac() >> (40 - i)) & 0xff) << i;
   }
   chipID = String(chipIDRaw);
-  FlashFS.begin(FORMAT_ON_FAIL);
   irsend.begin();
 }
 
@@ -332,7 +330,8 @@ void autoConnectInit(){
   config.autoReconnect = true;
   config.reconnectInterval = 1;
   config.ota = AC_OTA_BUILTIN;
-  config.apid = "Technics SA-GX170 - " + chipID;
+  config.apid = String(CLIENTID) + " - " + chipID;
+  FlashFS.begin();
   portal.config(config);
   homePageObj.load(homePage);
   settingsPageObj.load(settingsPage);
@@ -347,9 +346,9 @@ void autoConnectInit(){
 
 void setup() {
   hardwareInit();
+  beep(Buzzer::set);
   softwareInit();
   autoConnectInit();
-  beep(Buzzer::set);
 }
 
 void millisLoop() {
