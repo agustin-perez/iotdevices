@@ -3,7 +3,7 @@
 #include <PubSubClient.h>
 #include <WebServer.h>
 #include <AutoConnect.h>
-#include <SPIFFS.h>
+#include <LittleFS.h>
 #include <IRsend.h>
 #include <iostream>
 #include <string>
@@ -35,6 +35,7 @@
 #define OPTOPOWER   32 //S3-Y
 #define POWERSENS   12 //S3-W
 //CODE -----------------------
+#define FORMAT_ON_FAIL
 #define CLIENTID "Audio Receiver"
 #define PRONTOLENGTH 104
 
@@ -42,7 +43,6 @@ enum Buzzer {set, on, off, action};
 enum Opto {power, band, fmmode, memory, tuningd, tuningu, dtuning, spka, spkb, vcr1, cd, tuner, phono};
 enum Color {standby, error, onAction, onBoot, onEspError};
 
-fs::SPIFFSFS& FlashFS = SPIFFS;
 const char* mqttClientID = CLIENTID;
 const char* paramFile = "/param.json";
 const char* urlMqttHome = "/";
@@ -63,7 +63,7 @@ static const char settingsPage[] PROGMEM = R"({"title": "Settings", "uri": "/set
       {"name": "caption2", "type": "ACText", "value": "Relay powered on at boot<br>Useful for always-on appliances", "posterior": "par"},
       {"name": "buzzer", "type": "ACCheckbox", "label": "Disable buzzer", "checked": "false", "global": true},
       {"name": "voldown", "type": "ACCheckbox", "label": "Volume down on shutdown", "checked": "false", "global": true},
-      {"name": "volsteps", "type": "ACRange", "label": "Volume steps", "min": "1", "max": "10", "global": true},
+      {"name": "volsteps", "type": "ACRange", "label": "Volume steps", "min": "1", "max": "10", "magnify": "behind", "global": true},
       {"name": "save", "type": "ACSubmit", "value": "Save and connect", "uri": "/save"},
       {"name": "discard", "type": "ACSubmit", "value": "Discard", "uri": "/"}]
 })";
@@ -80,6 +80,7 @@ AutoConnectConfig config;
 AutoConnectAux homePageObj;
 AutoConnectAux settingsPageObj;
 AutoConnectAux saveSettingsFilePageObj;
+fs::LittleFSFS& FlashFS = LittleFS;
 uint16_t chipIDRaw = 0;
 String chipID;
 String strTopic;
@@ -89,95 +90,95 @@ String mqttUser;
 String mqttPass;
 bool buzzer;
 bool voldown;
-uint8_t volsteps; 
+uint8_t volsteps;
 bool powerState;
 unsigned long previousMillis = 0;
 const long interval = 500;
 
-void beep(Buzzer buzzer){
-  switch (buzzer){
+void beep(Buzzer buzzer) {
+  switch (buzzer) {
     case set: tone(BZ1, 3500, 1200);
-    break;
+      break;
     case on: tone(BZ1, 3000, 300);
-    break;
+      break;
     case off: tone(BZ1, 1500, 300);
-    break;
+      break;
     case action: tone(BZ1, 2000, 50);
-    break;
+      break;
   }
 }
 
-void sendOpto(Opto opto){
-    switch (buzzer){
-    case power:      
+void sendOpto(Opto opto) {
+  switch (buzzer) {
+    case power:
       digitalWrite(OPTOPOWER, HIGH);
       delay(40);
       digitalWrite(OPTOPOWER, LOW);
-    break;
+      break;
     case band:
       digitalWrite(OPTOBAND, HIGH);
       delay(40);
       digitalWrite(OPTOBAND, LOW);
-    break;
+      break;
     case fmmode:
       digitalWrite(OPTOFMMODE, HIGH);
       delay(40);
       digitalWrite(OPTOFMMODE, LOW);
-    break;
+      break;
     case memory:
       digitalWrite(OPTOMEMORY, HIGH);
       delay(40);
       digitalWrite(OPTOMEMORY, LOW);
-    break;
+      break;
     case tuningd:
       digitalWrite(OPTOTUNINGD, HIGH);
       delay(40);
       digitalWrite(OPTOTUNINGD, LOW);
-    break;
+      break;
     case tuningu:
       digitalWrite(OPTOTUNINGU, HIGH);
       delay(40);
       digitalWrite(OPTOTUNINGU, LOW);
-    break;
+      break;
     case dtuning:
       digitalWrite(OPTODTUNING, HIGH);
       delay(40);
       digitalWrite(OPTODTUNING, LOW);
-    break;
+      break;
     case spka:
       digitalWrite(OPTOSPKA, HIGH);
       delay(40);
       digitalWrite(OPTOSPKA, LOW);
-    break;
+      break;
     case spkb:
       digitalWrite(OPTOSPKB, HIGH);
       delay(40);
       digitalWrite(OPTOSPKB, LOW);
-    break;
+      break;
     case vcr1:
       digitalWrite(OPTOVCR1, HIGH);
       delay(40);
       digitalWrite(OPTOVCR1, LOW);
-    break;
+      break;
     case cd:
       digitalWrite(OPTOCD, HIGH);
       delay(40);
       digitalWrite(OPTOCD, LOW);
-    break;
+      break;
     case tuner:
       digitalWrite(OPTOTUNER, HIGH);
       delay(40);
       digitalWrite(OPTOTUNER, LOW);
-    break;
+      break;
     case phono:
       digitalWrite(OPTOPHONO, HIGH);
       delay(40);
       digitalWrite(OPTOPHONO, LOW);
-    break;
+      break;
   }
 }
 
-void sendProntoStr(char* cmnd){
+void sendProntoStr(char* cmnd) {
   std::string cmndStr(cmnd);
   uint16_t cmndArr[PRONTOLENGTH];
   uint16_t tempValue;
@@ -191,7 +192,7 @@ void sendProntoStr(char* cmnd){
   irsend.sendPronto(cmndArr, PRONTOLENGTH);
 }
 
-void setLED(){
+void setLED() {
 
 }
 
@@ -200,19 +201,19 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   strTopic = String((char*)topic);
   if (strTopic == "cmnd/audioreceiver/" + chipID + "/BTN") {
     strPayload = String((char*)payload);
-    if(strPayload == "POWER") sendOpto(Opto::power);
-    else if(strPayload == "BAND") sendOpto(Opto::band);
-    else if(strPayload == "FMMODE") sendOpto(Opto::fmmode);
-    else if(strPayload == "MEMORY") sendOpto(Opto::memory);
-    else if(strPayload == "TUNINGD") sendOpto(Opto::tuningd);
-    else if(strPayload == "TUNINGU") sendOpto(Opto::tuningu);
-    else if(strPayload == "DTUNING") sendOpto(Opto::dtuning);
-    else if(strPayload == "SPKA") sendOpto(Opto::spka);
-    else if(strPayload == "SPKB") sendOpto(Opto::spkb);
-    else if(strPayload == "VCR1") sendOpto(Opto::vcr1);
-    else if(strPayload == "CD") sendOpto(Opto::cd);
-    else if(strPayload == "TUNER") sendOpto(Opto::tuner);
-    else if(strPayload == "PHONO") sendOpto(Opto::phono);
+    if (strPayload == "POWER") sendOpto(Opto::power);
+    else if (strPayload == "BAND") sendOpto(Opto::band);
+    else if (strPayload == "FMMODE") sendOpto(Opto::fmmode);
+    else if (strPayload == "MEMORY") sendOpto(Opto::memory);
+    else if (strPayload == "TUNINGD") sendOpto(Opto::tuningd);
+    else if (strPayload == "TUNINGU") sendOpto(Opto::tuningu);
+    else if (strPayload == "DTUNING") sendOpto(Opto::dtuning);
+    else if (strPayload == "SPKA") sendOpto(Opto::spka);
+    else if (strPayload == "SPKB") sendOpto(Opto::spkb);
+    else if (strPayload == "VCR1") sendOpto(Opto::vcr1);
+    else if (strPayload == "CD") sendOpto(Opto::cd);
+    else if (strPayload == "TUNER") sendOpto(Opto::tuner);
+    else if (strPayload == "PHONO") sendOpto(Opto::phono);
   }
   if (strTopic == "cmnd/audioreceiver/" + chipID + "/IR") {
     sendProntoStr((char*)payload);
@@ -278,7 +279,7 @@ void mqttReconnect() {
   }
 }
 
-void hardwareInit(){
+void hardwareInit() {
   pinMode(BZ1, OUTPUT);
   digitalWrite(BZ1, LOW);
   pinMode(IRLED, OUTPUT);
@@ -318,20 +319,20 @@ void hardwareInit(){
   pinMode(POWERSENS, INPUT);
 }
 
-void softwareInit(){
+void softwareInit() {
   for (int i = 0; i < 17; i = i + 8) {
     chipIDRaw |= ((ESP.getEfuseMac() >> (40 - i)) & 0xff) << i;
   }
   chipID = String(chipIDRaw);
   irsend.begin();
+  FlashFS.begin(FORMAT_ON_FAIL);
 }
 
-void autoConnectInit(){
+void autoConnectInit() {
   config.autoReconnect = true;
   config.reconnectInterval = 1;
   config.ota = AC_OTA_BUILTIN;
   config.apid = String(CLIENTID) + " - " + chipID;
-  FlashFS.begin();
   portal.config(config);
   homePageObj.load(homePage);
   settingsPageObj.load(settingsPage);
