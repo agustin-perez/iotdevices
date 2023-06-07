@@ -22,7 +22,7 @@
 #define STAMqttClientID "Wall Socket"
 
 const char* mqttClientID = STAMqttClientID;
-const char* paramFile = "/param.json";
+const char* paramFile = "/param.json";T
 const char* urlMqttHome = "/";
 const char* urlSettings = "/settings";
 const char* urlSettingsSave = "/save";

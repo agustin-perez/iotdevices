@@ -1,50 +1,60 @@
+/**
+ * Es necesario hacer override en MQTT_MAX_PACKET_SIZE 1024, en el .h de PubSubClient
+ */ 
 #include <Arduino.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <WebServer.h>
 #include <AutoConnect.h>
-#include <LittleFS.h>
+#include <FS.h> 
 #include <IRsend.h>
 #include <iostream>
 #include <string>
 #include <sstream>
 
-//HARDWARE -------------------
+//HARDWARE ----------------------
 //BOARD
 #define BZ1 14
 //SOCKET 0
 #define IRLED 13
 //SOCKET 1
-#define OPTOBAND    5  //S1-B
-#define OPTOFMMODE  18 //S1-G
-#define OPTOMEMORY  19 //S1-O
-#define OPTOTUNINGD 21 //S1-Y
-#define OPTOTUNINGU 22 //S1-W
-#define OPTODTUNING 23 //S1-R
+#define OPTOBAND        5  //S1-B
+#define OPTOFMMODE      18 //S1-G
+#define OPTOMEMORY      19 //S1-O
+#define OPTOTUNINGD     21 //S1-Y
+#define OPTOTUNINGU     22 //S1-W
+#define OPTODTUNING     23 //S1-R
 //SOCKET 2
-#define OPTOSPKA    15 //S2-B     
-#define OPTOSPKB    2  //S2-G
-#define OPTOVCR1    0  //S2-O
-#define OPTOCD      4  //S2-Y
-#define OPTOTUNER   16 //S2-W
-#define OPTOPHONO   17 //S2-R
+#define OPTOSPKA        15 //S2-B     
+#define OPTOSPKB        2  //S2-G
+#define OPTOVCR1        0  //S2-O
+#define OPTOCD          4  //S2-Y
+#define OPTOTUNER       16 //S2-W
+#define OPTOPHONO       17 //S2-R
 //SOCKET 3
-#define LEDB        26 //S3-B
-#define LEDG        25 //S3-G
-#define LEDR        33 //S3-O
-#define OPTOPOWER   32 //S3-Y
-#define POWERSENS   12 //S3-W
-//CODE -----------------------
+#define LEDB            26 //S3-B
+#define LEDG            25 //S3-G
+#define LEDR            33 //S3-O
+#define OPTOPOWER       32 //S3-Y
+#define POWERSENS       12 //S3-W
+//CHANNELS ----------------------
+#define CHBZ1           0
+#define CHR             3
+#define CHG             2
+#define CHB             1
+//CODE --------------------------
 #define FORMAT_ON_FAIL
-#define CLIENTID "Audio Receiver"
-#define PRONTOLENGTH 104
+#define CLIENTID        "Audio Receiver"
+#define PRONTOLENGTH    104
+#undef  MQTT_MAX_PACKET_SIZE 
+#define MQTT_MAX_PACKET_SIZE 1024
 
 enum Buzzer {set, on, off, action};
 enum Opto {power, band, fmmode, memory, tuningd, tuningu, dtuning, spka, spkb, vcr1, cd, tuner, phono};
-enum Color {standby, error, onAction, onBoot, onEspError};
-
+enum Status {standby, idle, error, onAction, onBoot, onEspError};
+//enum LEDMode {static, fadein, fadeout};
 const char* mqttClientID = CLIENTID;
-const char* paramFile = "/param.json";
+const char* settingsFile = "/settings.json";
 const char* urlMqttHome = "/";
 const char* urlSettings = "/settings";
 const char* urlSettingsSave = "/save";
@@ -61,9 +71,9 @@ static const char settingsPage[] PROGMEM = R"({"title": "Settings", "uri": "/set
       {"name": "mqttUser", "type": "ACInput", "label": "User", "global": true},
       {"name": "mqttPass", "type": "ACInput", "label": "Password", "apply": "password", "global": true},
       {"name": "caption2", "type": "ACText", "value": "Relay powered on at boot<br>Useful for always-on appliances", "posterior": "par"},
-      {"name": "buzzer", "type": "ACCheckbox", "label": "Disable buzzer", "checked": "false", "global": true},
+      {"name": "buzzer", "type": "ACCheckbox", "label": "Enable buzzer", "checked": "false", "global": true},
       {"name": "voldown", "type": "ACCheckbox", "label": "Volume down on shutdown", "checked": "false", "global": true},
-      {"name": "volsteps", "type": "ACRange", "label": "Volume steps", "min": "1", "max": "10", "magnify": "behind", "global": true},
+      {"name": "volsteps", "type": "ACRange", "label": "Volume steps", "min": "1", "max": "10", "magnify": "infront", "global": true},
       {"name": "save", "type": "ACSubmit", "value": "Save and connect", "uri": "/save"},
       {"name": "discard", "type": "ACSubmit", "value": "Discard", "uri": "/"}]
 })";
@@ -80,7 +90,6 @@ AutoConnectConfig config;
 AutoConnectAux homePageObj;
 AutoConnectAux settingsPageObj;
 AutoConnectAux saveSettingsFilePageObj;
-fs::LittleFSFS& FlashFS = LittleFS;
 uint16_t chipIDRaw = 0;
 String chipID;
 String strTopic;
@@ -92,8 +101,10 @@ bool buzzer;
 bool voldown;
 uint8_t volsteps;
 bool powerState;
-unsigned long previousMillis = 0;
-const long interval = 500;
+unsigned long ledMillis= 0;
+unsigned long powerMillis= 0;
+const unsigned long ledMillisInterval = 25;
+const unsigned long powerMillisInterval = 500;
 
 void beep(Buzzer buzzer) {
   switch (buzzer) {
@@ -108,8 +119,32 @@ void beep(Buzzer buzzer) {
   }
 }
 
+void writeLED(uint16_t R, uint16_t G, uint16_t B){
+  ledcWrite(CHR, R);
+  ledcWrite(CHG, G);
+  ledcWrite(CHB, B);
+}
+
+void changeState(Status status){
+  switch(status){
+    case standby: writeLED(170,0,0);
+      break;
+    case idle: writeLED(0,0,0);
+      break;
+    case error: writeLED(255,0,0);
+      break;
+    case onAction: writeLED(0,0,150);
+      break;
+    case onBoot: writeLED(0,255,0);
+      break;
+    case onEspError: writeLED(255,0,255);
+      break;
+  }
+}
+
+
 void sendOpto(Opto opto) {
-  switch (buzzer) {
+  switch (opto) {
     case power:
       digitalWrite(OPTOPOWER, HIGH);
       delay(40);
@@ -178,25 +213,32 @@ void sendOpto(Opto opto) {
   }
 }
 
-void sendProntoStr(char* cmnd) {
-  std::string cmndStr(cmnd);
-  uint16_t cmndArr[PRONTOLENGTH];
-  uint16_t tempValue;
-  uint16_t index = 0;
-  cmndStr.erase(std::remove(cmndStr.begin(), cmndStr.end(), ' '), cmndStr.end());
-  std::istringstream iss(cmndStr);
-  while (iss >> std::hex >> tempValue) {
-    cmndArr[index] = tempValue;
-    index++;
+//TODO: REFACTOR DE ESTO URGENTE. FUNCIONA!!!
+void sendProntoStr(String code) {
+  Serial.print("Sending code");
+  uint16_t codeArr[PRONTOLENGTH];
+  String tempString;
+  int index = 0;
+  for (uint16_t i = 0; i < code.length(); i++) {
+    char currentChar = code.charAt(i);
+    if (currentChar == ' ') {
+      continue;
+    }
+    tempString += currentChar;
+    if (tempString.length() == 4) {
+      codeArr[index] = strtol(tempString.c_str(), NULL, 16);
+      index++;
+      tempString = "";
+    }
+    if (index == PRONTOLENGTH) {
+      break;
+    }
   }
-  irsend.sendPronto(cmndArr, PRONTOLENGTH);
-}
-
-void setLED() {
-
+  irsend.sendPronto(codeArr, PRONTOLENGTH);
 }
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  changeState(Status::onAction);
   payload[length] = '\0';
   strTopic = String((char*)topic);
   if (strTopic == "cmnd/audioreceiver/" + chipID + "/BTN") {
@@ -215,15 +257,20 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     else if (strPayload == "TUNER") sendOpto(Opto::tuner);
     else if (strPayload == "PHONO") sendOpto(Opto::phono);
   }
+  
   if (strTopic == "cmnd/audioreceiver/" + chipID + "/IR") {
-    sendProntoStr((char*)payload);
+    sendProntoStr(String((char*)payload));
   }
+  
   if (strTopic == "cmnd/audioreceiver/" + chipID + "/LED") {
-
+    String strData = String((char*)payload);
+    writeLED(strData.substring(0,2).toInt(), strData.substring(4,6).toInt(), strData.substring(8,10).toInt()); 
   }
+  changeState(Status::idle);
 }
 
-String settingsToPage(AutoConnectAux& aux, PageArgument& args) {
+String loadSettingsInPage(AutoConnectAux& aux, PageArgument& args) {
+  aux[F("header")].as<AutoConnectInput>().value = "<h2 style='text-align:center;color:#2f4f4f;margin-top:10px;margin-bottom:10px'>Wall Socket settings - ID:" + chipID + "</h2>";
   aux[F("mqttServer")].as<AutoConnectInput>().value = mqttServer;
   aux[F("mqttUser")].as<AutoConnectInput>().value = mqttUser;
   aux[F("mqttPass")].as<AutoConnectInput>().value = mqttPass;
@@ -247,18 +294,18 @@ String loadSavedSettings(AutoConnectAux& aux) {
 }
 
 void loadSettingsFile(AutoConnectAux& aux) {
-  File param = FlashFS.open(paramFile, "r");
-  if (param && aux.loadElement(param)) loadSavedSettings(aux);
-  param.close();
+  File file = SPIFFS.open(settingsFile, "r");
+  if (file && aux.loadElement(file)) loadSavedSettings(aux);
+  file.close();
 }
 
 String saveSettingsFile(AutoConnectAux& aux, PageArgument& args) {
   AutoConnectAux& settings = aux.referer();
   loadSavedSettings(settings);
-  File param = FlashFS.open(paramFile, "w");
-  if (param) {
-    settings.saveElement(param, {"mqttServer", "mqttUser", "mqttPass", "buzzer", "voldown", "volsteps"});
-    param.close();
+  File file = SPIFFS.open(settingsFile, "w");
+  if (file) {
+    settings.saveElement(file, {"mqttServer", "mqttUser", "mqttPass", "buzzer", "voldown", "volsteps"});
+    file.close();
   }
   return String();
 }
@@ -274,7 +321,9 @@ void mqttReconnect() {
     client.subscribe(("cmnd/audioreceiver/" + chipID + "/LED").c_str());
     client.subscribe(("stat/audioreceiver/" + chipID + "/POWER").c_str());
     client.publish(("avail/audioreceiver/" + chipID).c_str(), "ONLINE");
+    changeState(Status::idle);
   } else {
+    changeState(Status::error);
     delay(2000);
   }
 }
@@ -308,15 +357,17 @@ void hardwareInit() {
   digitalWrite(OPTOTUNER, LOW);
   pinMode(OPTOPHONO, OUTPUT);
   digitalWrite(OPTOPHONO, LOW);
-  pinMode(LEDB, OUTPUT);
-  digitalWrite(LEDB, LOW);
-  pinMode(LEDG, OUTPUT);
-  digitalWrite(LEDG, LOW);
-  pinMode(LEDR, OUTPUT);
-  digitalWrite(LEDR, LOW);
   pinMode(OPTOPOWER, OUTPUT);
   digitalWrite(OPTOPOWER, LOW);
   pinMode(POWERSENS, INPUT);
+  ledcSetup(CHB, 12000, 8);
+  ledcSetup(CHG, 12000, 8);
+  ledcSetup(CHR, 12000, 8);
+  ledcAttachPin(LEDB, CHB);
+  ledcAttachPin(LEDG, CHG);
+  ledcAttachPin(LEDR, CHR);
+  changeState(Status::onBoot);
+  irsend.begin();
 }
 
 void softwareInit() {
@@ -324,8 +375,7 @@ void softwareInit() {
     chipIDRaw |= ((ESP.getEfuseMac() >> (40 - i)) & 0xff) << i;
   }
   chipID = String(chipIDRaw);
-  irsend.begin();
-  FlashFS.begin(FORMAT_ON_FAIL);
+  SPIFFS.begin();
 }
 
 void autoConnectInit() {
@@ -338,31 +388,36 @@ void autoConnectInit() {
   settingsPageObj.load(settingsPage);
   saveSettingsFilePageObj.load(saveSettingsFilePage);
   portal.join({ homePageObj, settingsPageObj, saveSettingsFilePageObj });
-  portal.on(urlSettings, settingsToPage);
+  portal.on(urlSettings, loadSettingsInPage);
   portal.on(urlSettingsSave, saveSettingsFile);
   AutoConnectAux& settingsRestore = *portal.aux(urlSettings);
   loadSettingsFile(settingsRestore);
   portal.begin();
 }
-
+//enum Status {standby, idle, error, onAction, onBoot, onEspError};
+// changeState(Status status){
 void setup() {
+  Serial.begin(115200);
+  Serial.print("Booting");
   hardwareInit();
-  beep(Buzzer::set);
   softwareInit();
   autoConnectInit();
+  if (buzzer) beep(Buzzer::set);
 }
 
 void millisLoop() {
-
+  unsigned long current = millis();
+  if (current - ledMillis >= ledMillisInterval) {
+    ledMillis = current;
+  }
+  if (current - powerMillis >= powerMillisInterval) {
+    powerMillis = current;
+  }
 }
 
 void loop() {
   portal.handleClient();
   if (!client.connected()) mqttReconnect();
   client.loop();
-  unsigned long currentMillis = millis();
-  if (currentMillis - previousMillis >= interval) {
-    previousMillis = currentMillis;
-    millisLoop();
-  }
+  millisLoop();
 }
