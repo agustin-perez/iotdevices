@@ -221,17 +221,14 @@ void sendProntoStr(String code) {
   int index = 0;
   for (uint16_t i = 0; i < code.length(); i++) {
     char currentChar = code.charAt(i);
-    if (currentChar == ' ') {
-      continue;
-    }
-    tempString += currentChar;
-    if (tempString.length() == 4) {
-      codeArr[index] = strtol(tempString.c_str(), NULL, 16);
-      index++;
-      tempString = "";
-    }
-    if (index == PRONTOLENGTH) {
-      break;
+    if (currentChar != ' ') {
+      tempString += currentChar;
+      if (tempString.length() == 4) {
+        codeArr[index] = strtol(tempString.c_str(), NULL, 16);
+        index++;
+        tempString = "";
+      }
+      if (index == PRONTOLENGTH) break;
     }
   }
   irsend.sendPronto(codeArr, PRONTOLENGTH);
