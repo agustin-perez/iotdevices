@@ -15,9 +15,9 @@
 //SOCKET 2
 #define RELAY       22   
 //SOCKET 3
-#define LEDB        4  //S3-Y
-#define LEDG        0  //S3-W
-#define LEDR        15 //S3-R
+#define LEDB        16  //S3-Y
+#define LEDG        17  //S3-W
+#define LEDR        5   //S3-R
 //CHANNELS ----------------------
 #define CHBZ1       0
 #define CHR         3
@@ -239,11 +239,11 @@ void softwareInit() {
 
 void autoConnectInit() {
   config.autoReconnect = true;
+  config.reconnectInterval = 1;
+  config.apid = String(CLIENTID) + " - " + chipID;
   config.title = "Water heater - ID:" + chipID;
   config.hostName = "Water-heater-" + chipID;
-  config.reconnectInterval = 1;
   config.ota = AC_OTA_BUILTIN;
-  config.apid = String(CLIENTID) + " - " + chipID;
   portal.config(config);
   homePageObj.load(homePage);
   settingsPageObj.load(settingsPage);

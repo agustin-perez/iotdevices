@@ -33,10 +33,10 @@
 #define OPTOPHONO       17 //S2-R
 //SOCKET 3
 #define LEDB            26 //S3-B
-#define LEDG            25 //S3-G
+#define LEDG            12 //S3-G
 #define LEDR            33 //S3-O
 #define OPTOPOWER       32 //S3-Y
-#define POWERSENS       12 //S3-W
+#define POWERSENS       35 //S3-W
 //CHANNELS ----------------------
 #define CHBZ1           0
 #define CHR             3
@@ -378,8 +378,10 @@ void softwareInit() {
 void autoConnectInit() {
   config.autoReconnect = true;
   config.reconnectInterval = 1;
-  config.ota = AC_OTA_BUILTIN;
   config.apid = String(CLIENTID) + " - " + chipID;
+  config.title = "Audio receiver - ID:" + chipID;
+  config.hostName = "Audio receiver-" + chipID;
+  config.ota = AC_OTA_BUILTIN;
   portal.config(config);
   homePageObj.load(homePage);
   settingsPageObj.load(settingsPage);
