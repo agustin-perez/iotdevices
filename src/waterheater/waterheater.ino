@@ -272,12 +272,12 @@ void millisLoop() {
     if (currentThermostat) client.publish(("stat/waterheater/" + chipID + "/POWER").c_str(), "ON");
     else client.publish(("stat/waterheater/" + chipID + "/POWER").c_str(), "OFF");
   }
-  unsigned long current = millis();
-  if (current - ledMillis >= ledMillisInterval) {
-    ledMillis = current;
+  unsigned long currentMillis = millis();
+  if (currentMillis - ledMillis >= ledMillisInterval) {
+    ledMillis = currentMillis;
   }
-  if (current - PT100Millis >= PT100MillisMillisInterval) {
-    PT100Millis = current;
+  if (currentMillis - PT100Millis >= PT100MillisMillisInterval) {
+    PT100Millis = currentMillis;
   }
 }
 
