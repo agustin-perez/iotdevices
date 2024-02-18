@@ -3,7 +3,7 @@
 #include <PubSubClient.h>
 #include <WebServer.h>
 #include <AutoConnect.h>
-#include <DHT.h>;
+#include <DHT.h>
 #include <FS.h> 
 
 //HARDWARE ----------------------
@@ -143,12 +143,14 @@ void setTempState(float temp){
 
 void setRelayPower(bool power){
   if (power && safety){
+    Serial.println("Relay ON");
     isOn = true;
     digitalWrite(RELAY, HIGH);
     client.publish(("stat/waterheater/" + chipID + "/power").c_str(), "on");
     beep(Buzzer::on);
     changeState(Status::idle);
   } else {
+    Serial.println("Relay OFF");
     isOn = false;
     digitalWrite(RELAY, LOW);
     client.publish(("stat/waterheater/" + chipID + "/power").c_str(), "off");
@@ -195,12 +197,14 @@ String loadSavedSettings(AutoConnectAux& aux) {
 }
 
 void loadSettingsFile(AutoConnectAux& aux) {
+  Serial.println("Saving settings to file");
   File file = SPIFFS.open(settingsFile, "r");
   if (file && aux.loadElement(file)) loadSavedSettings(aux);
   file.close();
 }
 
 String saveSettingsFile(AutoConnectAux& aux, PageArgument& args) {
+  Serial.println("Loading settings");
   AutoConnectAux& settings = aux.referer();
   loadSavedSettings(settings);
   File file = SPIFFS.open(settingsFile, "w");
@@ -213,6 +217,7 @@ String saveSettingsFile(AutoConnectAux& aux, PageArgument& args) {
 
 
 void mqttReconnect() {
+  Serial.println("Reconnecting to MQTT Server");
   client.setCallback(mqttCallback);
   client.setServer(mqttServer.c_str(), 1883);
   if (client.connect(mqttClientID, mqttUser.c_str(), mqttPass.c_str())) {
@@ -227,13 +232,17 @@ void mqttReconnect() {
     client.publish(("stat/waterheater/" + chipID + "/safety").c_str(), "safe");
     client.publish(("stat/waterheater/" + chipID + "/thermostat").c_str(), "off");
     changeState(Status::idle);
+    Serial.println("MQTT Connected!\n");
   } else {
     changeState(Status::error);
+    Serial.println("MQTT Server connection failed... Retrying");
     delay(2000);
   }
 }
 
 void hardwareInit() {
+  Serial.begin(115200);
+  Serial.println("Booting ...");
   pinMode(BZ1, OUTPUT);
   digitalWrite(BZ1, LOW);
   pinMode(RELAY, OUTPUT);
@@ -251,22 +260,27 @@ void hardwareInit() {
 }
 
 void softwareInit() {
+  Serial.println("Loading efuse mac address");
   for (int i = 0; i < 17; i = i + 8) {
     chipIDRaw |= ((ESP.getEfuseMac() >> (40 - i)) & 0xff) << i;
   }
   chipID = String(chipIDRaw);
+  Serial.println("Initializing dht temperature sensor");
   dht.begin();
+  Serial.println("Initializing filesystem");
   SPIFFS.begin();
   safety = true;
 }
 
 void autoConnectInit() {
+  Serial.println("Loading AutoConnect");
   config.autoReconnect = true;
   config.reconnectInterval = 1;
   config.apid = String(CLIENTID) + " - " + chipID;
   config.title = "Water heater - ID:" + chipID;
   config.hostName = "Water-heater-" + chipID;
   config.ota = AC_OTA_BUILTIN;
+  Serial.println("Loading portal settings");
   portal.config(config);
   homePageObj.load(homePage);
   settingsPageObj.load(settingsPage);
@@ -275,14 +289,18 @@ void autoConnectInit() {
   portal.on(urlSettings, loadSettingsInPage);
   portal.on(urlSettingsSave, saveSettingsFile);
   AutoConnectAux& settingsRestore = *portal.aux(urlSettings);
+  Serial.println("Loading settings file");
   loadSettingsFile(settingsRestore);
   portal.begin();
 }
 
 void setup() {
   hardwareInit();
+  Serial.println("Hardware initialized ---------------- \n");
   softwareInit();
+  Serial.println("OS Loaded! ------------------------- \n");
   autoConnectInit();
+  Serial.println("AutoConnect ready! ---------------- \n");
   beep(Buzzer::set);
   if (alwaysOn) setRelayPower(true);
 }
