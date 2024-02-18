@@ -20,15 +20,12 @@
 #define LEDB        5   //S3-Y
 #define LEDG        17  //S3-W
 #define LEDR        16  //S3-R
-//CHANNELS ----------------------
-#define CHBZ1       0
 //CODE --------------------------
 #define FORMAT_ON_FAIL
 #define CLIENTID "Water heater"
 
 enum Buzzer {set, on, off, action};
 enum Status {standby, idle, error, onAction, onBoot, onEspError};
-//enum LEDMode {static, fadein, fadeout};
 const char* mqttClientID = CLIENTID;
 const char* settingsFile = "/settings.json";
 const char* urlMqttHome = "/";
@@ -268,7 +265,7 @@ void softwareInit() {
   Serial.println("Initializing dht temperature sensor");
   dht.begin();
   Serial.println("Initializing filesystem");
-  SPIFFS.begin();
+  SPIFFS.begin(true);
   safety = true;
 }
 
