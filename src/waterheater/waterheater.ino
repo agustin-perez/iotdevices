@@ -81,7 +81,7 @@ unsigned long thermostatMillis = 0;
 unsigned long DHT22Millis = 0;
 const unsigned long touchMillisInterval = 50;
 const unsigned long thermostatMillisInterval = 500;
-const unsigned long DHT22MillisMillisInterval = 1000;
+const unsigned long DHT22MillisMillisInterval = 2000;
 const float cold_threshold = 35.0; // Temperature below which it feels cold
 const float warm_threshold = 45.0; // Temperature above which it feels warm
 
