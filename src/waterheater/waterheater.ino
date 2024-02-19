@@ -256,6 +256,7 @@ void hardwareInit() {
   digitalWrite(LEDG, LOW);
   pinMode(LEDB, OUTPUT);
   digitalWrite(LEDB, LOW);
+  ledcAttachPin(BZ1, 0);
   changeState(Status::onBoot);
 }
 
