@@ -22,8 +22,9 @@
 #define LEDR        16  //S3-R
 //CODE --------------------------
 #define FORMAT_ON_FAIL
-#define CLIENTID "Water heater"
-
+#define CLIENTID    "Water heater"
+#define DHTTYPE     DHT22
+ 
 enum Buzzer {set, on, off, action};
 enum Status {standby, idle, error, onAction, onBoot, onEspError};
 const char* mqttClientID = CLIENTID;
@@ -60,7 +61,7 @@ AutoConnectConfig config;
 AutoConnectAux homePageObj;
 AutoConnectAux settingsPageObj;
 AutoConnectAux saveSettingsFilePageObj;
-DHT dht(TEMPSENS, DHT22);
+DHT dht(TEMPSENS, DHTTYPE);
 uint16_t chipIDRaw = 0;
 String chipID;
 String strTopic;
@@ -221,6 +222,7 @@ void mqttReconnect() {
     client.subscribe(("avail/waterheater/" + chipID).c_str());
     client.subscribe(("cmnd/waterheater/" + chipID + "/power").c_str());
     client.subscribe(("cmnd/waterheater/" + chipID + "/led").c_str());
+    client.subscribe(("stat/waterheater/" + chipID + "/power").c_str());
     client.subscribe(("stat/waterheater/" + chipID + "/thermostat").c_str());
     client.subscribe(("stat/waterheater/" + chipID + "/temp").c_str());
     client.subscribe(("stat/waterheater/" + chipID + "/safety").c_str());
@@ -245,6 +247,7 @@ void hardwareInit() {
   pinMode(RELAY, OUTPUT);
   digitalWrite(RELAY, LOW);
   pinMode(THERMOSTAT, INPUT);
+  pinMode(TEMPSENS, INPUT);
   pinMode(TOUCH, INPUT);
   digitalWrite(BZ1, LOW);
   pinMode(LEDR, OUTPUT);
@@ -327,13 +330,15 @@ void millisLoop() {
   if (currentMillis - DHT22Millis >= DHT22MillisMillisInterval) {
     DHT22Millis = currentMillis;
     float temp = dht.readTemperature();
-    if(isOn && safety){
+    
+    if(!isnan(temp) && isOn && safety){
       setTempState(temp);
+      client.publish(("stat/waterheater/" + chipID + "/temp").c_str(), String(temp).c_str());
     } else {
       changeState(Status::standby);
     }
-    
-    if (temp > 75.0){
+  
+    if (!isnan(temp) && temp > 75.0){
       beep(Buzzer::set);
       safety = false;
       client.publish(("stat/waterheater/" + chipID + "/safety").c_str(), "UNSAFE TEMPERATURE, SHUTTING DOWN!!!");
@@ -342,7 +347,6 @@ void millisLoop() {
     } else if (!safety){
       safety = true;
     }
-    client.publish(("stat/waterheater/" + chipID + "/temp").c_str(), String(temp).c_str());
   }
 }
 
