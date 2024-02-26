@@ -44,7 +44,8 @@ static const char settingsPage[] PROGMEM = R"({"title": "Settings", "uri": "/set
       {"name": "mqttServer", "type": "ACInput", "label": "Server", "pattern": "^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\\-]*[a-zA-Z0-9])\\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\\-]*[A-Za-z0-9])$", "placeholder": "MQTT server address", "global": true},
       {"name": "mqttUser", "type": "ACInput", "label": "User", "global": true},
       {"name": "mqttPass", "type": "ACInput", "label": "Password", "apply": "password", "global": true},
-      {"name": "resistanceTemp", "type": "ACRange", "label": "Resistance default temperature", "value": "50", "min": "0", "max": "70", "magnify": "behind", "global": true},
+      {"name": "resistanceHysteresis", "type": "ACRange", "label": "Thermostat hysteresis - °C", "value": "5", "min": "1", "max": "10", "magnify": "behind", "global": true},
+      {"name": "resistanceTemp", "type": "ACRange", "label": "Resistance default temperature - °C", "value": "50", "min": "0", "max": "70", "magnify": "behind", "global": true},
       {"name": "buzzer", "type": "ACCheckbox", "label": "Enable buzzer", "checked": "false", "global": true},
       {"name": "alwaysOn", "type": "ACCheckbox", "label": "Always on after restart", "checked": "false", "global": true},
       {"name": "save", "type": "ACSubmit", "value": "Save", "uri": "/save"},
@@ -82,6 +83,7 @@ unsigned int resistanceTemp;
 unsigned long touchMillis = 0;
 unsigned long thermostatMillis = 0;
 unsigned long tempSensMillis = 0;
+unsigned int resistanceHysteresis;
 const unsigned long touchMillisInterval = 50;
 const unsigned long thermostatMillisInterval = 500;
 const unsigned long tempSensMillisMillisInterval = 2000;
@@ -160,8 +162,8 @@ void resistanceTempUpdate(){
   float temp = dht.readTemperature();
   if (devicePower){
     if(!isnan(temp) && safety){
-      if (temp < resistanceTemp) setResistancePower(true);
-      else setResistancePower(false);
+      if (temp < resistanceTemp - resistanceHysteresis) setResistancePower(true);
+      else if (temp >= resistanceTemp) setResistancePower(false);
       setTempState(temp);
       client.publish(("stat/waterheater/" + chipID + "/temp").c_str(), String(temp).c_str());
     } else {
@@ -248,6 +250,7 @@ String loadSettingsInPage(AutoConnectAux& aux, PageArgument& args) {
   aux[F("mqttServer")].as<AutoConnectInput>().value = mqttServer;
   aux[F("mqttUser")].as<AutoConnectInput>().value = mqttUser;
   aux[F("mqttPass")].as<AutoConnectInput>().value = mqttPass;
+  aux[F("resistanceHysteresis")].as<AutoConnectInput>().value = resistanceHysteresis;
   aux[F("resistanceTemp")].as<AutoConnectInput>().value = resistanceTemp;
   aux[F("buzzer")].as<AutoConnectInput>().value = buzzer;
   aux[F("alwaysOn")].as<AutoConnectInput>().value = alwaysOn;
@@ -258,6 +261,7 @@ String loadSavedSettings(AutoConnectAux& aux) {
   mqttServer = aux[F("mqttServer")].as<AutoConnectInput>().value;
   mqttUser = aux[F("mqttUser")].as<AutoConnectInput>().value;
   mqttPass = aux[F("mqttPass")].as<AutoConnectInput>().value;
+  resistanceHysteresis = aux[F("resistanceHysteresis")].as<AutoConnectRange>().value;
   resistanceTemp = aux[F("resistanceTemp")].as<AutoConnectRange>().value;
   AutoConnectCheckbox& buzzerCheckbox = aux[F("buzzer")].as<AutoConnectCheckbox>();
   buzzer = buzzerCheckbox.checked;
@@ -279,12 +283,11 @@ String saveSettingsFile(AutoConnectAux& aux, PageArgument& args) {
   loadSavedSettings(settings);
   File file = SPIFFS.open(settingsFile, "w");
   if (file) {
-    settings.saveElement(file, {"mqttServer", "mqttUser", "mqttPass", "buzzer", "alwaysOn"});
+    settings.saveElement(file, {"mqttServer", "mqttUser", "mqttPass", "resistanceHysteresis", "resistanceTemp", "buzzer", "alwaysOn"});
     file.close();
   }
   return String();
 }
-
 
 void mqttReconnect() {
   Serial.println("Reconnecting to MQTT Server");
@@ -379,6 +382,7 @@ void setup() {
   autoConnectInit();
   Serial.println("AutoConnect ready! ---------------- \n");
   beep(Buzzer::set);
+  setResistancePower(false);
   if (alwaysOn) setDevicePower(true);
   else setDevicePower(false);
 }
