@@ -14,7 +14,7 @@
 //SOCKET 1
 #define THERMOSTAT  23
 //SOCKET 2
-#define RELAY       22   
+#define RESISTANCE  22   
 //SOCKET 3
 #define TOUCH       15
 #define LEDB        5   //S3-Y
@@ -44,8 +44,9 @@ static const char settingsPage[] PROGMEM = R"({"title": "Settings", "uri": "/set
       {"name": "mqttServer", "type": "ACInput", "label": "Server", "pattern": "^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\\-]*[a-zA-Z0-9])\\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\\-]*[A-Za-z0-9])$", "placeholder": "MQTT server address", "global": true},
       {"name": "mqttUser", "type": "ACInput", "label": "User", "global": true},
       {"name": "mqttPass", "type": "ACInput", "label": "Password", "apply": "password", "global": true},
+      {"name": "resistanceTemp", "type": "ACRange", "label": "Resistance default temperature", "value": "50", "min": "0", "max": "70", "magnify": "behind", "global": true},
       {"name": "buzzer", "type": "ACCheckbox", "label": "Enable buzzer", "checked": "false", "global": true},
-      {"name": "alwaysOn", "type": "ACCheckbox", "label": "Always on - on reboot", "checked": "false", "global": true},
+      {"name": "alwaysOn", "type": "ACCheckbox", "label": "Always on after restart", "checked": "false", "global": true},
       {"name": "save", "type": "ACSubmit", "value": "Save", "uri": "/save"},
       {"name": "discard", "type": "ACSubmit", "value": "Cancel", "uri": "/"}]
 })";
@@ -73,15 +74,17 @@ bool buzzer;
 bool alwaysOn;
 bool prevThermostat;
 bool thermostat;
-bool isOn;
+bool devicePower;
+bool resistancePower;
 bool safety;
 bool prevTouch;
+unsigned int resistanceTemp;
 unsigned long touchMillis = 0;
 unsigned long thermostatMillis = 0;
-unsigned long DHT22Millis = 0;
+unsigned long tempSensMillis = 0;
 const unsigned long touchMillisInterval = 50;
 const unsigned long thermostatMillisInterval = 500;
-const unsigned long DHT22MillisMillisInterval = 2000;
+const unsigned long tempSensMillisMillisInterval = 2000;
 const float cold_threshold = 35.0; // Temperature below which it feels cold
 const float warm_threshold = 45.0; // Temperature above which it feels warm
 
@@ -112,14 +115,28 @@ void changeState(Status status){
       break;
     case idle: writeLED(0,255,0);
       break;
-    case error: writeLED(255,0,0);
+    case error: writeLED(255,50,0);
       break;
-    case onAction: writeLED(0,0,255);
+    case onAction: writeLED(255,255,255);
       break;
     case onBoot: writeLED(255,255,255);
       break;
-    case onEspError: writeLED(255,0,255);
+    case onEspError: writeLED(255,255,0);
       break;
+  }
+}
+
+void setResistancePower(bool power){
+  if (power && safety){
+    Serial.println("Resistance ON");
+    resistancePower = true;
+    digitalWrite(RESISTANCE, HIGH);
+    client.publish(("stat/waterheater/" + chipID + "/resistance").c_str(), "on");
+  } else {
+    Serial.println("Resistance OFF");
+    resistancePower = false;
+    digitalWrite(RESISTANCE, LOW);
+    client.publish(("stat/waterheater/" + chipID + "/resistance").c_str(), "off");
   }
 }
 
@@ -139,37 +156,90 @@ void setTempState(float temp){
   }
 }
 
-void setRelayPower(bool power){
-  if (power && safety){
-    Serial.println("Relay ON");
-    isOn = true;
-    digitalWrite(RELAY, HIGH);
+void resistanceTempUpdate(){
+  float temp = dht.readTemperature();
+  if (devicePower){
+    if(!isnan(temp) && safety){
+      if (temp < resistanceTemp) setResistancePower(true);
+      else setResistancePower(false);
+      setTempState(temp);
+      client.publish(("stat/waterheater/" + chipID + "/temp").c_str(), String(temp).c_str());
+    } else {
+      changeState(Status::error);
+      setResistancePower(false);
+      beep(Buzzer::set);
+      beep(Buzzer::off);
+    }
+
+    if (!isnan(temp) && temp > 75.0){
+      beep(Buzzer::set);
+      safety = false;
+      client.publish(("stat/waterheater/" + chipID + "/safety").c_str(), "UNSAFE TEMPERATURE, SHUTTING DOWN!!!");
+      setResistancePower(false);
+      changeState(Status::error);
+    } else if (!safety){
+      safety = true;
+    }
+  }
+}
+
+void setResistanceTemp(unsigned int temp){
+  Serial.println("Resistance temp set to" + temp);
+  resistanceTemp = temp;
+  client.publish(("stat/waterheater/" + chipID + "/resistanceTemp").c_str(), String(temp).c_str());
+  resistanceTempUpdate();
+}
+
+void setDevicePower(bool power){
+  if (power){
+    Serial.println("Device ON");
+    devicePower = true;
     client.publish(("stat/waterheater/" + chipID + "/power").c_str(), "on");
+    resistanceTempUpdate();
     beep(Buzzer::on);
     changeState(Status::idle);
   } else {
-    Serial.println("Relay OFF");
-    isOn = false;
-    digitalWrite(RELAY, LOW);
+    Serial.println("Device OFF");
+    devicePower = false;
     client.publish(("stat/waterheater/" + chipID + "/power").c_str(), "off");
+    setResistancePower(false);
     beep(Buzzer::off);
-    changeState(Status::idle);
+    changeState(Status::standby);
   }
-
 }
+
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
   payload[length] = '\0';
   strTopic = String((char*)topic);
+
   if (strTopic == "cmnd/homeassistant/watchdog") {
     client.publish(("avail/waterheater/" + chipID).c_str(), "online");
+
+    if (devicePower) client.publish(("stat/waterheater/" + chipID + "/power").c_str(), "on"); 
+    else client.publish(("stat/waterheater/" + chipID + "/power").c_str(), "off");
+
+    if (resistancePower) client.publish(("stat/waterheater/" + chipID + "/resistance").c_str(), "on");
+    else client.publish(("stat/waterheater/" + chipID + "/resistance").c_str(), "off");
+
+    if (!digitalRead(THERMOSTAT)) client.publish(("stat/waterheater/" + chipID + "/thermostat").c_str(), "on");
+    else client.publish(("stat/waterheater/" + chipID + "/thermostat").c_str(), "off");  
+
+    client.publish(("stat/waterheater/" + chipID + "/resistanceTemp").c_str(), String(resistanceTemp).c_str());
   }
+
   if (strTopic == "cmnd/waterheater/" + chipID + "/power") {
     changeState(Status::onAction);
     String res = String((char*)payload);
-    if (res == "on" && safety) setRelayPower(true);
-    else if (res == "off") setRelayPower(false);
-    changeState(Status::idle);
+    if (res == "on") setDevicePower(true);
+    else if (res == "off") setDevicePower(false);
+  }
+
+  if (strTopic == "cmnd/waterheater/" + chipID + "/resistanceTemp") {
+    changeState(Status::onAction);
+    int temp = atoi((char*)payload);
+    setResistanceTemp(temp);
+    resistanceTempUpdate();
   }
 }
 
@@ -178,6 +248,7 @@ String loadSettingsInPage(AutoConnectAux& aux, PageArgument& args) {
   aux[F("mqttServer")].as<AutoConnectInput>().value = mqttServer;
   aux[F("mqttUser")].as<AutoConnectInput>().value = mqttUser;
   aux[F("mqttPass")].as<AutoConnectInput>().value = mqttPass;
+  aux[F("resistanceTemp")].as<AutoConnectInput>().value = resistanceTemp;
   aux[F("buzzer")].as<AutoConnectInput>().value = buzzer;
   aux[F("alwaysOn")].as<AutoConnectInput>().value = alwaysOn;
   return String();
@@ -187,6 +258,7 @@ String loadSavedSettings(AutoConnectAux& aux) {
   mqttServer = aux[F("mqttServer")].as<AutoConnectInput>().value;
   mqttUser = aux[F("mqttUser")].as<AutoConnectInput>().value;
   mqttPass = aux[F("mqttPass")].as<AutoConnectInput>().value;
+  resistanceTemp = aux[F("resistanceTemp")].as<AutoConnectRange>().value;
   AutoConnectCheckbox& buzzerCheckbox = aux[F("buzzer")].as<AutoConnectCheckbox>();
   buzzer = buzzerCheckbox.checked;
   AutoConnectCheckbox& alwaysOnCheckbox = aux[F("alwaysOn")].as<AutoConnectCheckbox>();
@@ -218,22 +290,26 @@ void mqttReconnect() {
   Serial.println("Reconnecting to MQTT Server");
   client.setCallback(mqttCallback);
   client.setServer(mqttServer.c_str(), 1883);
+
   if (client.connect(mqttClientID, mqttUser.c_str(), mqttPass.c_str())) {
+    client.subscribe("cmnd/homeassistant/watchdog");
     client.subscribe(("avail/waterheater/" + chipID).c_str());
     client.subscribe(("cmnd/waterheater/" + chipID + "/power").c_str());
-    client.subscribe(("cmnd/waterheater/" + chipID + "/led").c_str());
+    client.subscribe(("cmnd/waterheater/" + chipID + "/resistanceTemp").c_str());
     client.subscribe(("stat/waterheater/" + chipID + "/power").c_str());
     client.subscribe(("stat/waterheater/" + chipID + "/thermostat").c_str());
+    client.subscribe(("stat/waterheater/" + chipID + "/resistance").c_str());
+    client.subscribe(("stat/waterheater/" + chipID + "/resistanceTemp").c_str());
     client.subscribe(("stat/waterheater/" + chipID + "/temp").c_str());
     client.subscribe(("stat/waterheater/" + chipID + "/safety").c_str());
-    client.subscribe("cmnd/homeassistant/watchdog");
     client.publish(("avail/waterheater/" + chipID).c_str(), "online");
     client.publish(("stat/waterheater/" + chipID + "/safety").c_str(), "safe");
     client.publish(("stat/waterheater/" + chipID + "/thermostat").c_str(), "off");
+    client.publish(("stat/waterheater/" + chipID + "/resistanceTemp").c_str(), String(resistanceTemp).c_str());
     changeState(Status::idle);
     Serial.println("MQTT Connected!\n");
   } else {
-    changeState(Status::error);
+    changeState(Status::onEspError);
     Serial.println("MQTT Server connection failed... Retrying");
     delay(2000);
   }
@@ -244,8 +320,8 @@ void hardwareInit() {
   Serial.println("Booting ...");
   pinMode(BZ1, OUTPUT);
   digitalWrite(BZ1, LOW);
-  pinMode(RELAY, OUTPUT);
-  digitalWrite(RELAY, LOW);
+  pinMode(RESISTANCE, OUTPUT);
+  digitalWrite(RESISTANCE, LOW);
   pinMode(THERMOSTAT, INPUT);
   pinMode(TEMPSENS, INPUT);
   pinMode(TOUCH, INPUT);
@@ -303,7 +379,8 @@ void setup() {
   autoConnectInit();
   Serial.println("AutoConnect ready! ---------------- \n");
   beep(Buzzer::set);
-  if (alwaysOn) setRelayPower(true);
+  if (alwaysOn) setDevicePower(true);
+  else setDevicePower(false);
 }
 
 void millisLoop() {
@@ -312,11 +389,8 @@ void millisLoop() {
   
   if (currentThermostat != prevThermostat){
     prevThermostat = currentThermostat;
-    if (currentThermostat) { 
-      client.publish(("stat/waterheater/" + chipID + "/thermostat").c_str(), "on");
-    } else { 
-      client.publish(("stat/waterheater/" + chipID + "/thermostat").c_str(), "off");  
-    }
+    if (currentThermostat) client.publish(("stat/waterheater/" + chipID + "/thermostat").c_str(), "on");
+    else client.publish(("stat/waterheater/" + chipID + "/thermostat").c_str(), "off");  
   }
   
   if (currentMillis - touchMillis >= touchMillisInterval) {
@@ -324,30 +398,13 @@ void millisLoop() {
     bool touch = digitalRead(TOUCH);
     if (prevTouch != touch){
       prevTouch = touch;
-      if (touch) setRelayPower(!isOn);
+      if (touch) setDevicePower(!devicePower);
     }  
   }
   
-  if (currentMillis - DHT22Millis >= DHT22MillisMillisInterval) {
-    DHT22Millis = currentMillis;
-    float temp = dht.readTemperature();
-    
-    if(!isnan(temp) && isOn && safety){
-      setTempState(temp);
-      client.publish(("stat/waterheater/" + chipID + "/temp").c_str(), String(temp).c_str());
-    } else {
-      changeState(Status::standby);
-    }
-  
-    if (!isnan(temp) && temp > 75.0){
-      beep(Buzzer::set);
-      safety = false;
-      client.publish(("stat/waterheater/" + chipID + "/safety").c_str(), "UNSAFE TEMPERATURE, SHUTTING DOWN!!!");
-      setRelayPower(false);
-      changeState(Status::error);
-    } else if (!safety){
-      safety = true;
-    }
+  if (currentMillis - tempSensMillis >= tempSensMillisMillisInterval) {
+    tempSensMillis = currentMillis;
+    if(devicePower) resistanceTempUpdate();
   }
 }
 
