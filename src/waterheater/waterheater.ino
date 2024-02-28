@@ -22,10 +22,12 @@
 #define LEDR        16  //S3-R
 //CODE --------------------------
 #define FORMAT_ON_FAIL
-#define CLIENTID    "Water heater"
-#define DHTTYPE     DHT22
-#define DEVICEMAXTEMP 70
-#define SAFETYTEMP 75
+#define CLIENTID        "Water heater"
+#define DHTTYPE         DHT22
+#define DEVICEMAXTEMP   70
+#define SAFETYTEMP      75
+#define MAXSMARTTEMP    50
+#define MINSMARTTEMP    -20
 
 enum Buzzer {set, error, on, off, action};
 enum Status {standby, idle, onError, onAction, onBoot, onEspError};
@@ -53,8 +55,8 @@ static const char settingsPage[] PROGMEM = R"({"title": "Settings", "uri": "/set
       {"name": "alwaysOn", "type": "ACCheckbox", "label": "On by default", "checked": "false", "global": true},
       {"name": "caption3", "type": "ACText", "value": "Advanced  settings", "posterior": "par"},
       {"name": "resistanceHysteresis", "type": "ACRange", "label": "Thermostat hysteresis °C", "value": "5", "min": "1", "max": "15", "magnify": "behind", "global": true},
-      {"name": "maxSmartTemp", "type": "ACRange", "label": "Max smart mode temperature °C", "value": "65", "min": "0", "max": "70", "magnify": "behind", "global": true},
-      {"name": "minSmartTemp", "type": "ACRange", "label": "Min smart mode temperature °C", "value": "50", "min": "0", "max": "70", "magnify": "behind", "global": true},
+      {"name": "maxSmartTemp", "type": "ACRange", "label": "Max output smart mode temperature °C", "value": "65", "min": "0", "max": "70", "magnify": "behind", "global": true},
+      {"name": "minSmartTemp", "type": "ACRange", "label": "Min output smart mode temperature °C", "value": "50", "min": "0", "max": "70", "magnify": "behind", "global": true},
       {"name": "warmThresholdSet", "type": "ACRange", "label": "Warm threshold range -°C", "value": "20", "min": "0", "max": "40", "magnify": "behind", "global": true},
       {"name": "save", "type": "ACSubmit", "value": "Save", "uri": "/save"},
       {"name": "discard", "type": "ACSubmit", "value": "Cancel", "uri": "/"}]
@@ -87,6 +89,7 @@ String mqttPass;
 //Function vars
 unsigned int hotThreshold;
 unsigned int warmThreshold;
+int smartTempValue = 20;
 bool prevThermostat;
 bool thermostat;
 bool devicePower;
@@ -220,10 +223,9 @@ void smartTemp(float temp) {
   if (targetTemp > maxSmartTemp) {
     setResistanceTemp(maxSmartTemp);
   } else if (targetTemp <= maxSmartTemp && targetTemp > minSmartTemp) {
-    setResistanceTemp(temp);
+    setResistanceTemp(targetTemp);
   } else {
     setResistanceTemp(minSmartTemp);
-
   }
 }
 
@@ -263,6 +265,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     else client.publish(("stat/waterheater/" + chipID + "/thermostat").c_str(), "off");
 
     client.publish(("stat/waterheater/" + chipID + "/resistanceTemp").c_str(), String(resistanceTemp).c_str());
+    client.publish(("stat/waterheater/" + chipID + "/smartTemp").c_str(), String(smartTempValue).c_str());
   }
 
   if (strTopic == "cmnd/waterheater/" + chipID + "/power") {
@@ -286,6 +289,11 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   if (strTopic == "cmnd/waterheater/" + chipID + "/smartTemp") {
     changeState(Status::onAction);
     int temp = atoi((char*)payload);
+    if (temp > MAXSMARTTEMP) temp = MAXSMARTTEMP;
+    else if (temp < MINSMARTTEMP) temp = MINSMARTTEMP;
+    smartTempValue = temp;
+    client.publish(("stat/waterheater/" + chipID + "/smartTemp").c_str(), String(smartTempValue).c_str());
+    if (temp < 0) temp = 0;
     smartTemp(temp);
     resistanceTempUpdate();
   }
@@ -365,6 +373,7 @@ void mqttReconnect() {
     client.subscribe(("stat/waterheater/" + chipID + "/thermostat").c_str());
     client.subscribe(("stat/waterheater/" + chipID + "/resistance").c_str());
     client.subscribe(("stat/waterheater/" + chipID + "/resistanceTemp").c_str());
+    client.subscribe(("stat/waterheater/" + chipID + "/smartTemp").c_str());
     client.subscribe(("stat/waterheater/" + chipID + "/temp").c_str());
     client.subscribe(("stat/waterheater/" + chipID + "/safety").c_str());
     client.publish(("avail/waterheater/" + chipID).c_str(), "online");
