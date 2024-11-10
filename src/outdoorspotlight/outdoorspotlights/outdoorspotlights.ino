@@ -130,6 +130,7 @@ void mqttReconnect() {
     client.subscribe(("cmnd/outdoorspotlights/" + chipID + "/sw2").c_str());
     client.subscribe(("stat/outdoorspotlights/" + chipID + "/sw1").c_str());
     client.subscribe(("stat/outdoorspotlights/" + chipID + "/sw2").c_str());
+    client.subscribe(("stat/outdoorspotlights/" + chipID + "/log").c_str());
     client.publish(("avail/outdoorspotlights/" + chipID).c_str(), "online");
   } else {
     delay(2000);
@@ -159,6 +160,7 @@ void setup() {
   loadParams(settingsRestore);
   portal.begin();
   if (sw1state) digitalWrite(RL1, HIGH);
+  if (sw2state) digitalWrite(RL1, HIGH);
 }
 
 void loop() {
