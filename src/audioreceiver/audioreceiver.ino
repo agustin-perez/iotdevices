@@ -13,46 +13,37 @@
 #include <sstream>
 
 //HARDWARE ----------------------
+#define ESP32
 //BOARD
 #define BZ1 14
 //SOCKET 0
 #define IRLED 13
-//SOCKET 1
-#define OPTOBAND        5  //S1-B
-#define OPTOFMMODE      18 //S1-G
-#define OPTOMEMORY      19 //S1-O
-#define OPTOTUNINGD     21 //S1-Y
-#define OPTOTUNINGU     22 //S1-W
-#define OPTODTUNING     23 //S1-R
+//SOCKET 1 Sockets swapped
+//#define OPTOBAND        5  //S1-B
+//#define OPTOFMMODE      18 //S1-G
+//#define OPTOMEMORY      19 //S1-O
+//#define OPTOTUNINGD     21 //S1-Y
+//#define OPTOTUNINGU     22 //S1-W
+//#define OPTODTUNING     23 //S1-R
 //SOCKET 2
-#define OPTOSPKA        15 //S2-B     
-#define OPTOSPKB        2  //S2-G
-#define OPTOVCR1        0  //S2-O
-#define OPTOCD          4  //S2-Y
-#define OPTOTUNER       16 //S2-W
-#define OPTOPHONO       17 //S2-R
+#define OPTOSPKA        5//15 //S2-B     
+#define OPTOSPKB        18//2  //S2-G
+#define OPTOVCR1        19//0  //S2-O
+#define OPTOCD          21//4  //S2-Y
+#define OPTOTUNER       22//16 //S2-W
+#define OPTOPHONO       23//17 //S2-R
 //SOCKET 3
-#define LEDB            26 //S3-B
-#define LEDG            12 //S3-G
-#define LEDR            33 //S3-O
 #define OPTOPOWER       32 //S3-Y
 #define POWERSENS       35 //S3-W
 //CHANNELS ----------------------
 #define CHBZ1           0
-#define CHR             3
-#define CHG             2
-#define CHB             1
 //CODE --------------------------
 #define FORMAT_ON_FAIL
 #define CLIENTID        "Audio Receiver"
 #define PRONTOLENGTH    104
-#undef  MQTT_MAX_PACKET_SIZE 
-#define MQTT_MAX_PACKET_SIZE 1024
 
 enum Buzzer {set, on, off, action};
 enum Opto {power, band, fmmode, memory, tuningd, tuningu, dtuning, spka, spkb, vcr1, cd, tuner, phono};
-enum Status {standby, idle, error, onAction, onBoot, onEspError};
-//enum LEDMode {static, fadein, fadeout};
 const char* mqttClientID = CLIENTID;
 const char* settingsFile = "/settings.json";
 const char* urlMqttHome = "/";
@@ -65,7 +56,7 @@ static const char homePage[] PROGMEM = R"({"title": "Audio Receiver", "uri": "/"
 })";
 static const char settingsPage[] PROGMEM = R"({"title": "Settings", "uri": "/settings", "menu": true, "element": [
       {"name": "style", "type": "ACStyle", "value": "label+input,label+select{position:sticky;left:140px;width:204px!important;box-sizing:border-box;}"},
-      {"name": "header", "type": "ACElement", "value": "<h2 style='text-align:center;color:#2f4f4f;margin-top:10px;margin-bottom:10px'>Wall Socket settings</h2>"},
+      {"name": "header", "type": "ACElement", "value": "<h2 style='text-align:center;color:#2f4f4f;margin-top:10px;margin-bottom:10px'>Audio receiver settings</h2>"},
       {"name": "caption", "type": "ACText", "value": "Setup Home Assistant's MQTT Broker connection", "posterior": "par"},
       {"name": "mqttServer", "type": "ACInput", "label": "Server", "pattern": "^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\\-]*[a-zA-Z0-9])\\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\\-]*[A-Za-z0-9])$", "placeholder": "MQTT server address", "global": true},
       {"name": "mqttUser", "type": "ACInput", "label": "User", "global": true},
@@ -101,10 +92,6 @@ bool buzzer;
 bool voldown;
 uint8_t volsteps;
 bool powerState;
-unsigned long ledMillis= 0;
-unsigned long powerMillis= 0;
-const unsigned long ledMillisInterval = 25;
-const unsigned long powerMillisInterval = 500;
 
 void beep(Buzzer buzzer) {
   switch (buzzer) {
@@ -119,38 +106,15 @@ void beep(Buzzer buzzer) {
   }
 }
 
-void writeLED(uint16_t R, uint16_t G, uint16_t B){
-  ledcWrite(CHR, R);
-  ledcWrite(CHG, G);
-  ledcWrite(CHB, B);
-}
-
-void changeState(Status status){
-  switch(status){
-    case standby: writeLED(170,0,0);
-      break;
-    case idle: writeLED(0,0,0);
-      break;
-    case error: writeLED(255,0,0);
-      break;
-    case onAction: writeLED(0,0,150);
-      break;
-    case onBoot: writeLED(0,255,0);
-      break;
-    case onEspError: writeLED(255,0,255);
-      break;
-  }
-}
-
-
 void sendOpto(Opto opto) {
+  Serial.println("Sending physical signal");
   switch (opto) {
     case power:
       digitalWrite(OPTOPOWER, HIGH);
       delay(40);
       digitalWrite(OPTOPOWER, LOW);
       break;
-    case band:
+/*    case band:
       digitalWrite(OPTOBAND, HIGH);
       delay(40);
       digitalWrite(OPTOBAND, LOW);
@@ -180,6 +144,7 @@ void sendOpto(Opto opto) {
       delay(40);
       digitalWrite(OPTODTUNING, LOW);
       break;
+*/
     case spka:
       digitalWrite(OPTOSPKA, HIGH);
       delay(40);
@@ -213,9 +178,8 @@ void sendOpto(Opto opto) {
   }
 }
 
-//TODO: REFACTOR DE ESTO URGENTE. FUNCIONA!!!
-void sendProntoStr(String code) {
-  Serial.print("Sending code");
+void sendProntoStr(String code, int loop) {
+  Serial.println("Sending pronto code: " + code);
   uint16_t codeArr[PRONTOLENGTH];
   String tempString;
   int index = 0;
@@ -231,22 +195,23 @@ void sendProntoStr(String code) {
       if (index == PRONTOLENGTH) break;
     }
   }
-  irsend.sendPronto(codeArr, PRONTOLENGTH);
+  irsend.sendPronto(codeArr, PRONTOLENGTH, loop);
 }
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
-  changeState(Status::onAction);
   payload[length] = '\0';
   strTopic = String((char*)topic);
+  Serial.println("Mqtt command received on topic: " + strTopic);
   if (strTopic == "cmnd/audioreceiver/" + chipID + "/BTN") {
     strPayload = String((char*)payload);
+    Serial.println("Payload: " + strPayload);
     if (strPayload == "POWER") sendOpto(Opto::power);
-    else if (strPayload == "BAND") sendOpto(Opto::band);
-    else if (strPayload == "FMMODE") sendOpto(Opto::fmmode);
-    else if (strPayload == "MEMORY") sendOpto(Opto::memory);
-    else if (strPayload == "TUNINGD") sendOpto(Opto::tuningd);
-    else if (strPayload == "TUNINGU") sendOpto(Opto::tuningu);
-    else if (strPayload == "DTUNING") sendOpto(Opto::dtuning);
+    //else if (strPayload == "BAND") sendOpto(Opto::band);
+    //else if (strPayload == "FMMODE") sendOpto(Opto::fmmode);
+    //else if (strPayload == "MEMORY") sendOpto(Opto::memory);
+    //else if (strPayload == "TUNINGD") sendOpto(Opto::tuningd);
+    //else if (strPayload == "TUNINGU") sendOpto(Opto::tuningu);
+    //else if (strPayload == "DTUNING") sendOpto(Opto::dtuning);
     else if (strPayload == "SPKA") sendOpto(Opto::spka);
     else if (strPayload == "SPKB") sendOpto(Opto::spkb);
     else if (strPayload == "VCR1") sendOpto(Opto::vcr1);
@@ -254,16 +219,20 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     else if (strPayload == "TUNER") sendOpto(Opto::tuner);
     else if (strPayload == "PHONO") sendOpto(Opto::phono);
   }
-  
-  if (strTopic == "cmnd/audioreceiver/" + chipID + "/IR") {
-    sendProntoStr(String((char*)payload));
+
+  String irprefix = "cmnd/audioreceiver/" + chipID + "/IR/";
+  if (strTopic.substring(0, irprefix.length()) == irprefix) {
+      Serial.println(strTopic.substring(0, irprefix.length()));
+      sendProntoStr(
+          String((char*)payload),
+          strTopic.substring(irprefix.length()).toInt()
+    );
   }
-  
-  if (strTopic == "cmnd/audioreceiver/" + chipID + "/LED") {
-    String strData = String((char*)payload);
-    writeLED(strData.substring(0,2).toInt(), strData.substring(4,6).toInt(), strData.substring(8,10).toInt()); 
+
+  if (strTopic == "cmnd/homeassistant/watchdog") {
+    Serial.println("HA Watchdog received");
+    client.publish(("avail/audioreceiver/" + chipID).c_str(), "1");
   }
-  changeState(Status::idle);
 }
 
 String loadSettingsInPage(AutoConnectAux& aux, PageArgument& args) {
@@ -291,12 +260,14 @@ String loadSavedSettings(AutoConnectAux& aux) {
 }
 
 void loadSettingsFile(AutoConnectAux& aux) {
+  Serial.println("Loading settings file");
   File file = SPIFFS.open(settingsFile, "r");
   if (file && aux.loadElement(file)) loadSavedSettings(aux);
   file.close();
 }
 
 String saveSettingsFile(AutoConnectAux& aux, PageArgument& args) {
+  Serial.println("Saving settings file");
   AutoConnectAux& settings = aux.referer();
   loadSavedSettings(settings);
   File file = SPIFFS.open(settingsFile, "w");
@@ -304,23 +275,25 @@ String saveSettingsFile(AutoConnectAux& aux, PageArgument& args) {
     settings.saveElement(file, {"mqttServer", "mqttUser", "mqttPass", "buzzer", "voldown", "volsteps"});
     file.close();
   }
+  Serial.println("Settings file saved");
   return String();
 }
 
-
 void mqttReconnect() {
+  Serial.println("Reconnecting to MQTT Server");
   client.setCallback(mqttCallback);
   client.setServer(mqttServer.c_str(), 1883);
   if (client.connect(mqttClientID, mqttUser.c_str(), mqttPass.c_str())) {
     client.subscribe(("avail/audioreceiver/" + chipID).c_str());
     client.subscribe(("cmnd/audioreceiver/" + chipID + "/BTN").c_str());
-    client.subscribe(("cmnd/audioreceiver/" + chipID + "/IR").c_str());
+    client.subscribe(("cmnd/audioreceiver/" + chipID + "/IR/+").c_str());
     client.subscribe(("cmnd/audioreceiver/" + chipID + "/LED").c_str());
     client.subscribe(("stat/audioreceiver/" + chipID + "/POWER").c_str());
-    client.publish(("avail/audioreceiver/" + chipID).c_str(), "ONLINE");
-    changeState(Status::idle);
+    client.subscribe("cmnd/homeassistant/watchdog");
+    client.publish(("avail/audioreceiver/" + chipID).c_str(), "1");
+    Serial.println("MQTT Connected!\n");
   } else {
-    changeState(Status::error);
+    Serial.println("MQTT Server connection failed... Retrying");
     delay(2000);
   }
 }
@@ -330,7 +303,7 @@ void hardwareInit() {
   digitalWrite(BZ1, LOW);
   pinMode(IRLED, OUTPUT);
   digitalWrite(IRLED, LOW);
-  pinMode(OPTOBAND, OUTPUT);
+/*  pinMode(OPTOBAND, OUTPUT);
   digitalWrite(OPTOBAND, LOW);
   pinMode(OPTOFMMODE, OUTPUT);
   digitalWrite(OPTOFMMODE, LOW);
@@ -342,6 +315,7 @@ void hardwareInit() {
   digitalWrite(OPTOTUNINGU, LOW);
   pinMode(OPTODTUNING, OUTPUT);
   digitalWrite(OPTODTUNING, LOW);
+*/
   pinMode(OPTOSPKA, OUTPUT);
   digitalWrite(OPTOSPKA, LOW);
   pinMode(OPTOSPKB, OUTPUT);
@@ -357,31 +331,28 @@ void hardwareInit() {
   pinMode(OPTOPOWER, OUTPUT);
   digitalWrite(OPTOPOWER, LOW);
   pinMode(POWERSENS, INPUT);
-  ledcSetup(CHB, 12000, 8);
-  ledcSetup(CHG, 12000, 8);
-  ledcSetup(CHR, 12000, 8);
-  ledcAttachPin(LEDB, CHB);
-  ledcAttachPin(LEDG, CHG);
-  ledcAttachPin(LEDR, CHR);
-  changeState(Status::onBoot);
   irsend.begin();
 }
 
 void softwareInit() {
+  Serial.println("Loading efuse mac address");
   for (int i = 0; i < 17; i = i + 8) {
     chipIDRaw |= ((ESP.getEfuseMac() >> (40 - i)) & 0xff) << i;
   }
   chipID = String(chipIDRaw);
-  SPIFFS.begin();
+  Serial.println("Initializing filesystem");
+  SPIFFS.begin(true);
 }
 
 void autoConnectInit() {
+  Serial.println("Loading AutoConnect");
   config.autoReconnect = true;
   config.reconnectInterval = 1;
   config.apid = String(CLIENTID) + " - " + chipID;
   config.title = "Audio receiver - ID:" + chipID;
   config.hostName = "Audio receiver-" + chipID;
   config.ota = AC_OTA_BUILTIN;
+  Serial.println("Loading portal settings");
   portal.config(config);
   homePageObj.load(homePage);
   settingsPageObj.load(settingsPage);
@@ -390,27 +361,35 @@ void autoConnectInit() {
   portal.on(urlSettings, loadSettingsInPage);
   portal.on(urlSettingsSave, saveSettingsFile);
   AutoConnectAux& settingsRestore = *portal.aux(urlSettings);
+  Serial.println("Loading settings file");
   loadSettingsFile(settingsRestore);
   portal.begin();
 }
-//enum Status {standby, idle, error, onAction, onBoot, onEspError};
-// changeState(Status status){
+
 void setup() {
   Serial.begin(115200);
-  Serial.print("Booting");
+  Serial.print("Booting ...");
   hardwareInit();
+  Serial.println("Hardware initialized ---------------- \n");
   softwareInit();
+  Serial.println("OS Loaded! ------------------------- \n");
   autoConnectInit();
+  Serial.println("AutoConnect ready! ---------------- \n");
   if (buzzer) beep(Buzzer::set);
 }
 
 void millisLoop() {
-  unsigned long current = millis();
-  if (current - ledMillis >= ledMillisInterval) {
-    ledMillis = current;
-  }
-  if (current - powerMillis >= powerMillisInterval) {
-    powerMillis = current;
+  bool currentPower = !digitalRead(POWERSENS);
+  if (currentPower != powerState) {
+    powerState = currentPower;
+    if (currentPower) {
+      Serial.println("Power ON");
+      client.publish(("stat/audioreceiver/" + chipID + "/POWER").c_str(), "1");
+    }
+    else {
+      Serial.println("Power OFF");
+      client.publish(("stat/audioreceiver/" + chipID + "/POWER").c_str(), "0");
+    } 
   }
 }
 
